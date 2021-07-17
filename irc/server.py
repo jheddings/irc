@@ -41,6 +41,8 @@ will ever be connected to by the public.
 #   - PING timeouts
 #   - Allow all numerical commands.
 #   - Users can send commands to channels they are not in (PART)
+#   - Support server password.
+#   - Support custom MOTD?
 # Not Todo (Won't be supported)
 #   - Server linking.
 
@@ -51,6 +53,7 @@ import socket
 import select
 import re
 import socketserver
+import threading
 import typing
 
 import jaraco.logging
@@ -506,6 +509,8 @@ class IRCServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
     clients: typing.Dict[str, IRCClient] = {}
     "Connected clients by nick name"
 
+    daemon: typing.Optional[threading.Thread] = None
+
     def __init__(self, *args, **kwargs):
         self.servername = 'localhost'
         self.channels = {}
@@ -513,6 +518,18 @@ class IRCServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
 
         super().__init__(*args, **kwargs)
 
+    def start(self, background=False):
+        if background:
+            self.daemon = threading.Thread(target=self.serve_forever, daemon=True)
+            self.daemon.start()
+        else:
+            self.serve_forever(poll_interval=1)
+
+    def stop(self):
+        self.shutdown()
+
+        if self.daemon:
+            self.daemon.join()
 
 def get_args():
     parser = argparse.ArgumentParser()
@@ -548,10 +565,15 @@ def main():
         ircserver = IRCServer(bind_address, IRCClient)
         _tmpl = 'Listening on {listen_address}:{listen_port}'
         log.info(_tmpl.format(**vars(options)))
-        ircserver.serve_forever()
+        ircserver.start()
+    except KeyboardInterrupt:
+        log.info('canceled by user')
     except socket.error as e:
         log.error(repr(e))
         raise SystemExit(-2)
+
+    ircserver.stop()
+    log.debug('server stopped')
 
 
 if __name__ == "__main__":
